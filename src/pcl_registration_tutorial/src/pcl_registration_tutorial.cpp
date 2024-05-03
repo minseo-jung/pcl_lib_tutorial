@@ -32,6 +32,10 @@ void PclRegistrationTutorial::Init()
 
     p_pcd_source_registered_ = nh.advertise<sensor_msgs::PointCloud2>("source_pcd_registered", 10);
 
+    p_pcd_icp_normal_registered_ = nh.advertise<sensor_msgs::PointCloud2>("source_icp_normal_results", 10);
+
+
+
 
     // Load PCD
     if (pcl::io::loadPCDFile<pcl::PointXYZ> (cfg_str_pcd_source_path_, *pcd_source_pcptr_) == -1){
@@ -168,6 +172,21 @@ void PclRegistrationTutorial::IcpNormalRegistration()
     pcl::PointCloud<pcl::PointNormal>::Ptr cloud_target_normals(new pcl::PointCloud<pcl::PointNormal>);
 
     // ... [포인트 클라우드를 로드하고 정규를 계산하는 코드] ...
+    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normal_estimator;
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr kd_tree(new pcl::search::KdTree<pcl::PointXYZ>());
+    normal_estimator.setSearchMethod(kd_tree);
+    normal_estimator.setKSearch(10);
+
+    pcl::PointCloud<pcl::Normal>::Ptr source_normals(new pcl::PointCloud<pcl::Normal>);
+    pcl::PointCloud<pcl::Normal>::Ptr target_normals(new pcl::PointCloud<pcl::Normal>);
+
+    normal_estimator.setInputCloud(pcd_source_pcptr_);
+    normal_estimator.compute(*source_normals);
+    pcl::concatenateFields(*pcd_source_pcptr_, *source_normals, *cloud_source_normals);
+
+    normal_estimator.setInputCloud(pcd_target_pcptr_);
+    normal_estimator.compute(*target_normals);
+    pcl::concatenateFields(*pcd_target_pcptr_, *target_normals, *cloud_target_normals);
 
     // ICP 객체 생성
     pcl::IterativeClosestPointWithNormals<pcl::PointNormal, pcl::PointNormal> icp;
@@ -177,6 +196,9 @@ void PclRegistrationTutorial::IcpNormalRegistration()
     // 정렬을 실행하고 결과를 저장합니다
     pcl::PointCloud<pcl::PointNormal> Final;
     icp.align(Final);
+
+    pcl::toROSMsg(Final, o_icp_normal_output);
+    o_icp_normal_output.header.frame_id = "world";
 
     auto icp_end = std::chrono::steady_clock::now();
     ROS_INFO("[IcpNormalRegistration]  %f (ms)", std::chrono::duration_cast<std::chrono::microseconds>(icp_end - icp_start).count()/1000.0);
@@ -253,6 +275,8 @@ void PclRegistrationTutorial::Publish()
     p_pcd_target_origin_.publish(o_pcd_target_origin_msg_);
 
     p_pcd_source_registered_.publish(o_pcd_source_registered_msg_);
+
+    p_pcd_icp_normal_registered_.publish(o_icp_normal_output);
 }
 
 

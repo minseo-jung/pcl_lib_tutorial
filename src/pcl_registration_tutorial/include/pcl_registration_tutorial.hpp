@@ -88,10 +88,14 @@ class PclRegistrationTutorial{
 
     ros::Publisher p_pcd_source_registered_;
 
+    ros::Publisher p_pcd_icp_normal_registered_;
+
     sensor_msgs::PointCloud2 o_pcd_source_origin_msg_;
     sensor_msgs::PointCloud2 o_pcd_target_origin_msg_;
 
     sensor_msgs::PointCloud2 o_pcd_source_registered_msg_;
+
+    sensor_msgs::PointCloud2 o_icp_normal_output;
 
 
     private: // 내부 자료
