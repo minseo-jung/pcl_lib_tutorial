@@ -267,15 +267,78 @@ void PclRegistrationTutorial::PointToPointHw()
     ROS_INFO("Run PointToPointHw Started");
     auto icp_start = std::chrono::steady_clock::now();
 
+    // source: pcd_source_pcptr_
+    // target: pcd_target_pcptr_
+
     // TODO
 
-    // 0. Make iteration
+    // 0. data definition
+
+    int point_num = pcd_source_pcptr_-> size();
+    double lambda = 0.1;
+    double cfg_d_transform_epsilon_ = 0.05;
+    double rot_epsilon = 1.;
 
     // 1. Point to Point association between pcd_source_pcptr_, pcd_target_pcptr_
+    pcl::KdTreeFLANN<pcl::PointXYZ>::Ptr kd_tree(new pcl::KdTreeFLANN<pcl::PointXYZ>());
+    kd_tree -> setInputCloud(pcd_target_pcptr_);
 
-    // 2. levenberg marquardt optimization
+    *pcd_source_registered_pcptr_ = *pcd_source_pcptr_;
 
+    for(int iter = 0; iter < cfg_i_max_iteration_; iter++){
+        Eigen::MatrixXd coefficients(point_num, 3);
+        Eigen::VectorXd coefficient_distance(point_num);
 
+        for(int idx=0; idx < point_num; idx++){
+            std::vector<int> nearest_point_idx(1);
+            std::vector<float> nearest_point_distance(1);
+
+            kd_tree -> nearestKSearch(pcd_source_registered_pcptr_ -> points[idx], 1, nearest_point_idx, nearest_point_distance);
+
+            coefficient_distance(idx) = sqrt(nearest_point_distance[0]);
+
+            Eigen::Vector3d diff;
+            diff(0) = pcd_source_registered_pcptr_ -> points[idx].x - pcd_target_pcptr_ -> points[nearest_point_idx[0]].x;
+            diff(1) = pcd_source_registered_pcptr_ -> points[idx].y - pcd_target_pcptr_ -> points[nearest_point_idx[0]].y;
+            diff(2) = pcd_source_registered_pcptr_ -> points[idx].z - pcd_target_pcptr_ -> points[nearest_point_idx[0]].z;
+
+            double norm = diff.norm();
+
+            coefficients.row(idx) = diff.transpose() / norm;
+        }
+
+        // t = transpose
+        Eigen::MatrixXd matA = Eigen::MatrixXd::Zero(point_num, 3);
+        Eigen::MatrixXd matB = Eigen::VectorXd::Zero(point_num);
+
+        for(int i = 0; i < point_num; ++i){
+            double rot_yaw = pcd_source_registered_pcptr_->points[i].x * coefficients(i,1) - pcd_source_registered_pcptr_->points[i].y * coefficients(i,0);
+            matA.row(i) << rot_yaw, coefficients(i, 0), coefficients(i, 1);
+            matB(i) = -coefficient_distance(i);
+        }
+
+        Eigen::MatrixXd matAt = matA.transpose();
+        Eigen::MatrixXd matAtA = matAt * matA + lambda * (matAt * matA).diagonal().asDiagonal().toDenseMatrix();
+        Eigen::VectorXd matAtB = matAt * matB;
+
+        Eigen::VectorXd matX = matAtA.ldlt().solve(matAtB);
+
+        // std::cout << "Dyaw: " << matX(0) * 180 / M_PI << ", dx: " << matX(1) << ", dy: " << matX(2) << "\n";
+
+        Eigen::Affine3f transform = Eigen::Affine3f::Identity();
+        transform.rotate(Eigen::AngleAxisf(matX(0), Eigen::Vector3f::UnitZ()));
+        transform.translation() << matX(1), matX(2), 0;
+
+        pcl::transformPointCloud(*pcd_source_registered_pcptr_, *pcd_source_registered_pcptr_, transform);
+
+        std::cout << matX << std::endl; 
+        
+        if (fabs(matX(1)) < cfg_d_transform_epsilon_ && fabs(matX(2)) < cfg_d_transform_epsilon_ && fabs(matX(0) * 180 / M_PI) < rot_epsilon){
+            std::cout << "breaks in " << iter << std::endl;
+            break;
+        }
+            
+    }
 
     auto icp_end = std::chrono::steady_clock::now();
     ROS_INFO("[PointToPointHw]  %f (ms)", std::chrono::duration_cast<std::chrono::microseconds>(icp_end - icp_start).count()/1000.0);
